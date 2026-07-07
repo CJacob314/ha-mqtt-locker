@@ -1,0 +1,26 @@
+# mqtt-locker.service
+[Unit]
+Description=Expose a Home Assistant MQTT button that locks this desktop
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Optional env file
+EnvironmentFile=-%h/.config/mqtt-locker/env
+
+# Simple defaults. Values given in the optional env file above will override these
+Environment=LOCK_PROG=swaylock
+Environment=LOCK_PROG_ARGS=
+Environment=HOME_ASSISTANT_AREA=Office
+# Make sure to set MQTT_BROKER_HOST and MQTT_BROKER_PORT in the environment file or here
+# MQTT_BROKER_USERNAME and MQTT_BROKER_PASSWORD can be set as well if authentication is needed
+
+ExecStart=%h/.cargo/bin/mqtt-locker
+
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
