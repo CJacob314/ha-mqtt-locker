@@ -1,7 +1,12 @@
-use std::{process::{Command, Stdio}, time::Duration};
 use envconfig::Envconfig;
 use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
 use serde_json::json;
+use std::{
+    process::{Command, Stdio},
+    sync::mpsc::{self, TrySendError},
+    thread,
+    time::Duration,
+};
 
 /// Stores config options as set in environment variables
 #[derive(Envconfig)]
@@ -29,46 +34,91 @@ struct Config {
 }
 
 fn main() {
-    let Config { lock_prog, lock_prog_args, mqtt_broker_host, mqtt_broker_port, mqtt_broker_username, mqtt_broker_password, home_assistant_area } = Config::init_from_env().unwrap();
+    let Config {
+        lock_prog,
+        lock_prog_args,
+        mqtt_broker_host,
+        mqtt_broker_port,
+        mqtt_broker_username,
+        mqtt_broker_password,
+        home_assistant_area,
+    } = Config::init_from_env().unwrap();
 
-    let mut mqtt_options = MqttOptions::new("mqtt-locker", &mqtt_broker_host, mqtt_broker_port);
-    mqtt_options.set_keep_alive(Duration::from_secs(5));
-    mqtt_options.set_credentials(&mqtt_broker_username, &mqtt_broker_password);
+    // Sync channel with no buffer since the worker thread will either be available -> we lock,
+    // or unavailable -> we ignore the lock command
+    let (tx, rx) = mpsc::sync_channel::<()>(0);
 
-    let (mut client, mut connection) = Client::new(mqtt_options, 10);
-    client.subscribe("desktop/lock/set", QoS::AtMostOnce).unwrap();
-    client.publish("homeassistant/button/desktop_lock/config", QoS::AtMostOnce, true, discovery_payload(&home_assistant_area)).unwrap();
-    client.publish("desktop/lock/availability", QoS::AtMostOnce, true, "online").unwrap();
+    thread::scope(move |scope| {
+        // Spawn worker thread (which will fork to run the lock program and wait on that child)
+        scope.spawn(move || {
+            while rx.recv().is_ok() {
+                lock(&lock_prog, &lock_prog_args)
+            }
+        });
 
-    for notification in connection.iter() {
-        match notification {
-            Ok(Event::Incoming(Incoming::Publish(publish))) => {
-                if publish.topic != "desktop/lock/set" {
-                    continue;
+        let mut mqtt_options = MqttOptions::new("mqtt-locker", &mqtt_broker_host, mqtt_broker_port);
+        mqtt_options.set_keep_alive(Duration::from_secs(5));
+        mqtt_options.set_credentials(&mqtt_broker_username, &mqtt_broker_password);
+
+        let (client, mut connection) = Client::new(mqtt_options, 10);
+        client
+            .subscribe("desktop/lock/set", QoS::AtMostOnce)
+            .unwrap();
+        client
+            .publish(
+                "homeassistant/button/desktop_lock/config",
+                QoS::AtMostOnce,
+                true,
+                discovery_payload(&home_assistant_area),
+            )
+            .unwrap();
+        client
+            .publish("desktop/lock/availability", QoS::AtMostOnce, true, "online")
+            .unwrap();
+
+        for notification in connection.iter() {
+            match notification {
+                Ok(Event::Incoming(Incoming::Publish(publish))) => {
+                    if publish.topic != "desktop/lock/set" {
+                        continue;
+                    }
+
+                    let payload = std::str::from_utf8(&publish.payload).unwrap_or("").trim();
+
+                    if payload == "LOCK" {
+                        // Attempt to tell the worker thread to lock
+                        match tx.try_send(()) {
+                            Ok(()) => (), // worker thread successfully received message
+                            Err(TrySendError::Full(())) => {
+                                eprintln!("Ignoring LOCK command: computer already locked")
+                            }
+                            Err(TrySendError::Disconnected(())) => panic!(
+                                "ERROR: Worker thread unexpectedly disconnected from sync channel"
+                            ),
+                        }
+                    }
                 }
-
-                let payload = std::str::from_utf8(&publish.payload).unwrap_or("").trim();
-
-                if payload == "LOCK" {
-                    lock(&lock_prog, &lock_prog_args)
+                Ok(_) => (), // Not currently handling anything else
+                Err(err) => {
+                    eprintln!("MQTT error: {err}");
                 }
-            },
-            Ok(_) => (), // Not currently handling anything else
-            Err(err) => {
-                eprintln!("MQTT error: {err}");
             }
         }
-    }
+    });
 }
 
 /// Spawn the `LOCK_PROG` using `LOCK_PROG_ARGS` as a child process and await its exit
 fn lock(lock_prog: &str, lock_prog_args: &str) {
+    println!("Received LOCK command: locking computer.");
     Command::new(lock_prog)
         .args(lock_prog_args.split_whitespace())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .stdin(Stdio::null())
-        .spawn().unwrap().wait().unwrap();
+        .spawn()
+        .unwrap()
+        .wait()
+        .unwrap();
 }
 
 fn discovery_payload(home_assistant_area: &str) -> Vec<u8> {
