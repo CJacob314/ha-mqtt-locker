@@ -1,5 +1,5 @@
 use envconfig::Envconfig;
-use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
+use rumqttc::{Client, ConnectReturnCode, Event, Incoming, MqttOptions, QoS};
 use serde_json::json;
 use std::{
     process::{Command, Stdio},
@@ -61,23 +61,30 @@ fn main() {
         mqtt_options.set_credentials(&mqtt_broker_username, &mqtt_broker_password);
 
         let (client, mut connection) = Client::new(mqtt_options, 10);
-        client
-            .subscribe("desktop/lock/set", QoS::AtMostOnce)
-            .unwrap();
-        client
-            .publish(
-                "homeassistant/button/desktop_lock/config",
-                QoS::AtMostOnce,
-                true,
-                discovery_payload(&home_assistant_area),
-            )
-            .unwrap();
-        client
-            .publish("desktop/lock/availability", QoS::AtMostOnce, true, "online")
-            .unwrap();
 
         for notification in connection.iter() {
             match notification {
+                Ok(Event::Incoming(Incoming::ConnAck(conn_ack))) => {
+                    if conn_ack.code != ConnectReturnCode::Success {
+                        panic!("ConnAck packet had a failure code: {:?}", conn_ack.code);
+                    }
+
+                    /* Successful connect. Subscribe to receive LOCK commands and advertise discovery. */
+                    client
+                        .subscribe("desktop/lock/set", QoS::AtMostOnce)
+                        .unwrap();
+                    client
+                        .publish(
+                            "homeassistant/button/desktop_lock/config",
+                            QoS::AtMostOnce,
+                            true,
+                            discovery_payload(&home_assistant_area),
+                        )
+                        .unwrap();
+                    client
+                        .publish("desktop/lock/availability", QoS::AtMostOnce, true, "online")
+                        .unwrap();
+                }
                 Ok(Event::Incoming(Incoming::Publish(publish))) => {
                     if publish.topic != "desktop/lock/set" {
                         continue;

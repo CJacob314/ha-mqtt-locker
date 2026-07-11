@@ -43,6 +43,6 @@ systemctl --user enable "${SERVICE_FILE}"
 
 echo
 echo "Installed. Next steps:"
-echo "  1. Edit ${ENV_FILE}"
+echo "  1. Edit ${ENV_FILE} if needed"
 echo "  2. Start the service:"
 echo "       systemctl --user start ${SERVICE_FILE}"
