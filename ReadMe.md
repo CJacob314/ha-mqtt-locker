@@ -18,7 +18,10 @@ entity expects lock **and unlock** semantics, and `ha-mqtt-locker` intentionally
 - Rust and Cargo
 - A running MQTT broker reachable from this machine
 - Home Assistant with the MQTT integration enabled
-- For normal use: systemd user services
+- Systemd
+  - I spawn the configured locking program using `systemd-run` to make sure environment variables have correct values, like `WAYLAND_DISPLAY` for instance.
+- Your locking program must not daemonize itself on a fork-child and let the parent exit
+  - That is, the spawned locking program must exit only after the display has been unlocked, not once the display has been locked
 
 ## Quick Install
 
