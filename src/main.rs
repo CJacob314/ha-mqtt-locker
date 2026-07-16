@@ -59,7 +59,12 @@ fn main() {
         let mut mqtt_options = MqttOptions::new("mqtt-locker", &mqtt_broker_host, mqtt_broker_port);
         mqtt_options.set_keep_alive(Duration::from_secs(30));
         mqtt_options.set_credentials(&mqtt_broker_username, &mqtt_broker_password);
-        mqtt_options.set_last_will(LastWill::new("desktop/lock/availability", "offline", QoS::AtMostOnce, true));
+        mqtt_options.set_last_will(LastWill::new(
+            "desktop/lock/availability",
+            "offline",
+            QoS::AtMostOnce,
+            true,
+        ));
 
         let (client, mut connection) = Client::new(mqtt_options, 10);
 
@@ -118,7 +123,9 @@ fn main() {
 /// Spawn the `LOCK_PROG` using `LOCK_PROG_ARGS` as a child process and await its exit
 fn lock(lock_prog: &str, lock_prog_args: &str) {
     println!("Received LOCK command: locking computer.");
-    Command::new(lock_prog)
+    Command::new("systemd-run")
+        .args(["--user", "--wait", "--collect", "--"])
+        .arg(lock_prog)
         .args(lock_prog_args.split_whitespace())
         .stdout(Stdio::null())
         .stdin(Stdio::null())
