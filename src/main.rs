@@ -1,5 +1,5 @@
 use envconfig::Envconfig;
-use rumqttc::{Client, ConnectReturnCode, Event, Incoming, MqttOptions, QoS};
+use rumqttc::{Client, ConnectReturnCode, Event, Incoming, LastWill, MqttOptions, QoS};
 use serde_json::json;
 use std::{
     process::{Command, Stdio},
@@ -57,8 +57,9 @@ fn main() {
         });
 
         let mut mqtt_options = MqttOptions::new("mqtt-locker", &mqtt_broker_host, mqtt_broker_port);
-        mqtt_options.set_keep_alive(Duration::from_secs(5));
+        mqtt_options.set_keep_alive(Duration::from_secs(30));
         mqtt_options.set_credentials(&mqtt_broker_username, &mqtt_broker_password);
+        mqtt_options.set_last_will(LastWill::new("desktop/lock/availability", "offline", QoS::AtMostOnce, true));
 
         let (client, mut connection) = Client::new(mqtt_options, 10);
 
