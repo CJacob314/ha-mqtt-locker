@@ -121,7 +121,6 @@ fn lock(lock_prog: &str, lock_prog_args: &str) {
     Command::new(lock_prog)
         .args(lock_prog_args.split_whitespace())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
         .stdin(Stdio::null())
         .spawn()
         .unwrap()
